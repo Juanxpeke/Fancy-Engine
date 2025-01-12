@@ -1,0 +1,6 @@
+# Build
+**/Build
+
+# Visual Studio
+.vs
+.vscode
