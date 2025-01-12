@@ -9,3 +9,4 @@ function(add_example TARGET_NAME)
 endfunction(add_example)
 
 add_example(Main)
+add_example(HelloTriangleApplication)

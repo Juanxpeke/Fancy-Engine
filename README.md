@@ -26,6 +26,10 @@ If you want to have the project in your device:
 - Clone the project
 - Update the third party modules with ```git submodule update --init```
 
+### Formatting
+
+All the code in this repository is automatically formatted using the default configuration that comes from the C/C++ Extension Pack and Better C++ Syntax extensions for Visual Studio Code.
+
 
 ## Building
 
