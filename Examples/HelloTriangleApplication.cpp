@@ -4,11 +4,27 @@
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
+#include <cstring>
 
 #include <vector>
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
+
+/*
+Validation layers are optional components that hook into Vulkan function calls to apply additional operations.
+Vulkan does not come with any validation layers built-in, but the LunarG Vulkan SDK provides a nice set of layers that check for common errors.
+They can only be used if they have been installed onto the system. For example, the LunarG validation layers are only available on PCs with the Vulkan SDK installed.
+All of the useful standard validation is bundled into a layer included in the SDK that is known as VK_LAYER_KHRONOS_validation.
+*/
+const std::vector<const char *> validationLayers = {
+    "VK_LAYER_KHRONOS_validation"};
+
+#ifdef NDEBUG
+const bool enableValidationLayers = false;
+#else
+const bool enableValidationLayers = true;
+#endif
 
 class HelloTriangleApplication
 {
@@ -46,7 +62,15 @@ private:
 
     void createInstance()
     {
-        checkExtensions();
+        if (enableValidationLayers && !checkValidationLayerSupport())
+        {
+            throw std::runtime_error("Validation layers requested, but not available!");
+        }
+
+        if (!checkExtensionsSupport())
+        {
+            throw std::runtime_error("Required extensions not supported!");
+        }
 
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -71,8 +95,16 @@ private:
         createInfo.enabledExtensionCount = glfwExtensionCount;
         createInfo.ppEnabledExtensionNames = glfwExtensions;
 
-        // The last two members of the struct determine the global validation layers to enable. Just leave these empty for now
-        createInfo.enabledLayerCount = 0;
+        // The last two members of the struct determine the global validation layers to enable
+        if (enableValidationLayers)
+        {
+            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+            createInfo.ppEnabledLayerNames = validationLayers.data();
+        }
+        else
+        {
+            createInfo.enabledLayerCount = 0;
+        }
 
         // We've now specified everything Vulkan needs to create an instance
         if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS)
@@ -81,7 +113,7 @@ private:
         }
     }
 
-    void checkExtensions()
+    bool checkExtensionsSupport()
     {
         // The first parameter allows us to filter extensions by a specific validation layer, which we'll ignore for now
         uint32_t extensionCount = 0;
@@ -105,22 +137,54 @@ private:
 
         for (uint32_t i = 0; i < glfwExtensionCount; i++)
         {
-            bool found = false;
+            bool extensionFound = false;
 
             for (const auto &extension : extensions)
             {
                 if (strcmp(glfwExtensions[i], extension.extensionName) == 0)
                 {
-                    found = true;
+                    extensionFound = true;
                     break;
                 }
             }
 
-            if (!found)
+            if (!extensionFound)
             {
-                throw std::runtime_error("Missing required GLFW extension!");
+                return false;
             }
         }
+
+        return true;
+    }
+
+    bool checkValidationLayerSupport()
+    {
+        uint32_t layerCount;
+        vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+
+        std::vector<VkLayerProperties> availableLayers(layerCount);
+        vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+        for (const char *layerName : validationLayers)
+        {
+            bool layerFound = false;
+
+            for (const auto &layerProperties : availableLayers)
+            {
+                if (strcmp(layerName, layerProperties.layerName) == 0)
+                {
+                    layerFound = true;
+                    break;
+                }
+            }
+
+            if (!layerFound)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     void mainLoop()
