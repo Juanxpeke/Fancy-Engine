@@ -7,15 +7,16 @@
 #include <cstring>
 
 #include <vector>
+#include <optional>
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
 /*
-Validation layers are optional components that hook into Vulkan function calls to apply additional operations.
-Vulkan does not come with any validation layers built-in, but the LunarG Vulkan SDK provides a nice set of layers that check for common errors.
-They can only be used if they have been installed onto the system. For example, the LunarG validation layers are only available on PCs with the Vulkan SDK installed.
-All of the useful standard validation is bundled into a layer included in the SDK that is known as VK_LAYER_KHRONOS_validation.
+Validation layers are optional components that hook into Vulkan function calls to apply additional operations
+Vulkan does not come with any validation layers built-in, but the LunarG Vulkan SDK provides a nice set of layers that check for common errors
+They can only be used if they have been installed onto the system. For example, the LunarG validation layers are only available on PCs with the Vulkan SDK installed
+All of the useful standard validation is bundled into a layer included in the SDK that is known as VK_LAYER_KHRONOS_validation
 */
 const std::vector<const char *> validationLayers = {
     "VK_LAYER_KHRONOS_validation"};
@@ -25,6 +26,19 @@ const bool enableValidationLayers = false;
 #else
 const bool enableValidationLayers = true;
 #endif
+
+/*
+Indices of queue families that we need to find for the physical device we'll be using
+*/
+struct QueueFamilyIndices
+{
+    std::optional<uint32_t> graphicsFamily;
+
+    bool areRequiredFamiliesFound()
+    {
+        return graphicsFamily.has_value();
+    }
+};
 
 class HelloTriangleApplication
 {
@@ -58,6 +72,7 @@ private:
     void initVulkan()
     {
         createInstance();
+        pickPhysicalDevice();
     }
 
     void createInstance()
@@ -185,6 +200,87 @@ private:
         }
 
         return true;
+    }
+
+    void pickPhysicalDevice()
+    {
+        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+
+        uint32_t deviceCount = 0;
+        vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+
+        if (deviceCount == 0)
+        {
+            throw std::runtime_error("Failed to find GPUs with Vulkan support!");
+        }
+
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
+        for (const auto &device : devices)
+        {
+            if (isDeviceSuitable(device))
+            {
+                physicalDevice = device;
+                break;
+            }
+        }
+
+        if (physicalDevice == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("Failed to find a suitable GPU!");
+        }
+    }
+
+    bool isDeviceSuitable(VkPhysicalDevice device)
+    {
+        // Basic device properties like the name, type and supported Vulkan version
+        VkPhysicalDeviceProperties deviceProperties;
+        vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+        // Optional features like texture compression, 64 bit floats and multi viewport rendering
+        VkPhysicalDeviceFeatures deviceFeatures;
+        vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+        // Let's say we consider our application only usable for dedicated graphics cards that support geometry shaders
+        bool supportsGeometryShaders = deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
+                                       deviceFeatures.geometryShader;
+
+        // Almost every operation in Vulkan, anything from drawing to uploading textures, requires commands to be submitted to a queue
+        // There are different types of queues that originate from different queue families and each family of queues allows only a subset of commands
+        // We need to check which queue families are supported by the device and which one of these supports the commands that we want to use
+        bool hasRequiredQueueFamilies = findQueueFamilies(device).areRequiredFamiliesFound();
+
+        return supportsGeometryShaders && hasRequiredQueueFamilies;
+    }
+
+    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
+    {
+        QueueFamilyIndices indices;
+
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        int i = 0;
+        for (const auto &queueFamily : queueFamilies)
+        {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            {
+                indices.graphicsFamily = i;
+            }
+
+            if (indices.areRequiredFamiliesFound())
+            {
+                break;
+            }
+
+            i++;
+        }
+
+        return indices;
     }
 
     void mainLoop()
