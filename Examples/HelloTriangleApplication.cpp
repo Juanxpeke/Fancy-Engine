@@ -56,6 +56,14 @@ private:
 
     VkInstance instance;
 
+    // This object will be implicitly destroyed when the VkInstance is destroyed, so we won't need to do anything new in the cleanup function
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+
+    VkDevice device;
+
+    // Device queues are implicitly cleaned up when the device is destroyed, so we don't need to do anything in cleanup
+    VkQueue graphicsQueue;
+
     void initWindow()
     {
         glfwInit();
@@ -73,6 +81,7 @@ private:
     {
         createInstance();
         pickPhysicalDevice();
+        createLogicalDevice();
     }
 
     void createInstance()
@@ -204,8 +213,6 @@ private:
 
     void pickPhysicalDevice()
     {
-        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
 
@@ -283,6 +290,56 @@ private:
         return indices;
     }
 
+    void createLogicalDevice()
+    {
+        QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+        // We need to define structures that describe the number of queues we want for each queue family
+        VkDeviceQueueCreateInfo queueCreateInfo{};
+        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+        queueCreateInfo.queueCount = 1;
+
+        float queuePriority = 1.0f;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+
+        // We won't be using any features for now
+        VkPhysicalDeviceFeatures deviceFeatures{};
+
+        // With the previous two structures in place, we can start filling in the main VkDeviceCreateInfo structure
+        VkDeviceCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
+        createInfo.pQueueCreateInfos = &queueCreateInfo;
+        createInfo.queueCreateInfoCount = 1;
+
+        createInfo.pEnabledFeatures = &deviceFeatures;
+
+        // The remainder of the information bears a resemblance to the VkInstanceCreateInfo struct and requires you to specify extensions and validation layers
+        // The difference is that these are device specific this time
+
+        // Previous implementations of Vulkan made a distinction between instance and device specific validation layers, but this is no longer the case
+        // That means that the enabledLayerCount and ppEnabledLayerNames fields of VkDeviceCreateInfo are ignored by up-to-date implementations
+        createInfo.enabledExtensionCount = 0;
+
+        if (enableValidationLayers)
+        {
+            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+            createInfo.ppEnabledLayerNames = validationLayers.data();
+        }
+        else
+        {
+            createInfo.enabledLayerCount = 0;
+        }
+
+        // We won't need any device specific extensions for now
+
+        if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create logical device!");
+        }
+    }
+
     void mainLoop()
     {
         while (!glfwWindowShouldClose(window))
@@ -293,6 +350,8 @@ private:
 
     void cleanup()
     {
+        vkDestroyDevice(device, nullptr);
+
         vkDestroyInstance(instance, nullptr);
 
         glfwDestroyWindow(window);
