@@ -97,7 +97,9 @@ private:
     // for example if it should be treated as a 2D texture depth texture without any mipmapping levels
     std::vector<VkImageView> swapChainImageViews;
 
+    VkRenderPass renderPass;
     VkPipelineLayout pipelineLayout;
+    VkPipeline graphicsPipeline;
 
     void initWindow()
     {
@@ -120,6 +122,7 @@ private:
         createLogicalDevice();
         createSwapChain();
         createImageViews();
+        createRenderPass();
         createGraphicsPipeline();
     }
 
@@ -618,6 +621,52 @@ private:
         }
     }
 
+    void createRenderPass()
+    {
+        // We will have just one color buffer attachment represented by one of the images from the swap chain
+        // The format should be the same as the one used in the swap chain
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format = swapChainImageFormat;
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+
+        // The loadOp and storeOp determine what to do with the data in the attachment before rendering and after rendering
+        // We are clearing the framebuffer to black before drawing a new frame
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        // Out application will not be doing anything with the stencil buffer, so we don't care about these
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        // Textures and framebuffers in Vulkan are represented by VkImage objects with a certain pixel format, but the layout of the pixels in memory can change
+        // based on what you're going to do with the image
+        // Images need to be transitioned to specific layouts that are suitable for the operation that we are specifying next
+        // The initial layout is set as VK_IMAGE_LAYOUT_UNDEFINED to indicate that we don't care what previous layout the image was in, because we're going to clear it anyway
+        // The final layout specifies the layout that the image will have after the render pass, in this case we want it to be ready for presentation using the swap chain
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        VkAttachmentReference colorAttachmentRef{};
+        colorAttachmentRef.attachment = 0;
+        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        // The index of the attachment in this array is directly referenced from the fragment shader with the layout(location = 0) out vec4 outColor directive!
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &colorAttachmentRef;
+
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+
+        if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create render pass!");
+        }
+    }
+
     void createGraphicsPipeline()
     {
         auto vertShaderCode = readFile("../../Examples/Shaders/Vert.spv");
@@ -723,6 +772,30 @@ private:
             throw std::runtime_error("Failed to create pipeline layout!");
         }
 
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = shaderStages;
+        pipelineInfo.pVertexInputState = &vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = nullptr; // Optional
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = pipelineLayout;
+        pipelineInfo.renderPass = renderPass;
+        pipelineInfo.subpass = 0;
+
+        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+        pipelineInfo.basePipelineIndex = -1;              // Optional
+
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create graphics pipeline!");
+        }
+
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
     }
@@ -773,7 +846,9 @@ private:
 
     void cleanup()
     {
+        vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        vkDestroyRenderPass(device, renderPass, nullptr);
 
         for (auto imageView : swapChainImageViews)
         {
