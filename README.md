@@ -22,8 +22,8 @@ You can find examples showing most of the functionalities of the engine in the `
 
 If you want to have the project in your device:
 
-- Clone the project
-- Update the third party modules with ```git submodule update --init```
+- Clone the project.
+- Update the third party modules with ```git submodule update --init --recursive```.
 
 ### Formatting
 
