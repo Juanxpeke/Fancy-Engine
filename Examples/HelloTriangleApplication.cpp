@@ -2,7 +2,6 @@
 #include <GLFW/glfw3.h>
 
 #include <iostream>
-#include <fstream>
 #include <stdexcept>
 #include <cstdlib>
 #include <cstring>
@@ -15,14 +14,13 @@
 #include <limits>    // Necessary for std::numeric_limits
 #include <algorithm> // Necessary for std::clamp
 
+#include "../Source/IO.h"
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
 /*
-Validation layers are optional components that hook into Vulkan function calls to apply additional operations
 Vulkan does not come with any validation layers built-in, but the LunarG Vulkan SDK provides a nice set of layers that check for common errors
-They can only be used if they have been installed onto the system. For example, the LunarG validation layers are only available on PCs with the Vulkan SDK installed
-All of the useful standard validation is bundled into a layer included in the SDK that is known as VK_LAYER_KHRONOS_validation
 */
 const std::vector<const char *> validationLayers = {
     "VK_LAYER_KHRONOS_validation"};
@@ -34,7 +32,7 @@ const bool enableValidationLayers = true;
 #endif
 
 /*
-
+Required extensions in order for the application to work
 */
 const std::vector<const char *> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME};
@@ -46,15 +44,16 @@ struct QueueFamilyIndices
 {
     std::optional<uint32_t> graphicsFamily;
     std::optional<uint32_t> presentFamily;
+    std::optional<uint32_t> computeFamily;
 
-    bool areRequiredFamiliesFound()
+    bool supportsRequiredFamilies()
     {
         return graphicsFamily.has_value() && presentFamily.has_value();
     }
 };
 
 /*
-Properties we need to check when selecting a physical device
+Swap chain properties we need to check when selecting a physical device
 */
 struct SwapChainSupportDetails
 {
@@ -79,6 +78,7 @@ private:
 
     VkInstance instance;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+    QueueFamilyIndices physicalDeviceQueueFamilyIndices;
 
     VkDevice device;
     VkQueue graphicsQueue;
@@ -139,31 +139,35 @@ private:
         createSyncObjects();
     }
 
+    /*
+    An instance is the connection between your application and the Vulkan library, in which we pass information about our application
+    to the driver and retrieve a handle to use the Vulkan API
+    */
     void createInstance()
     {
-        if (enableValidationLayers && !checkValidationLayerSupport())
+        if (enableValidationLayers && !checkInstanceValidationLayerSupport())
         {
-            throw std::runtime_error("Validation layers requested, but not available!");
+            throw std::runtime_error("Validation layers requested, but not available");
         }
 
-        if (!checkExtensionsSupport())
+        if (!checkInstanceExtensionsSupport())
         {
-            throw std::runtime_error("Required extensions not supported!");
+            throw std::runtime_error("Required extensions not supported");
         }
 
-        VkApplicationInfo appInfo{};
-        appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = "Hello Triangle";
-        appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.pEngineName = "No Engine";
-        appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_0;
+        VkApplicationInfo applicationInfo{};
+        applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+        applicationInfo.pApplicationName = "Hello Triangle";
+        applicationInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+        applicationInfo.pEngineName = "No Engine";
+        applicationInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+        applicationInfo.apiVersion = VK_API_VERSION_1_0;
 
-        // This struct is not optional and tells the Vulkan driver which global extensions and validation layers we want to use
-        // Global here means that they apply to the entire program and not a specific device, which will become clear in the next few chapters
+        // This struct tells the Vulkan driver which global extensions and validation layers we want to use
+        // That means they apply to the entire program and not a specific device
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-        createInfo.pApplicationInfo = &appInfo;
+        createInfo.pApplicationInfo = &applicationInfo;
 
         // Vulkan is a platform agnostic API, which means that you need an extension to interface with the window system
         uint32_t glfwExtensionCount = 0;
@@ -174,7 +178,6 @@ private:
         createInfo.enabledExtensionCount = glfwExtensionCount;
         createInfo.ppEnabledExtensionNames = glfwExtensions;
 
-        // The last two members of the struct determine the global validation layers to enable
         if (enableValidationLayers)
         {
             createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
@@ -185,14 +188,13 @@ private:
             createInfo.enabledLayerCount = 0;
         }
 
-        // We've now specified everything Vulkan needs to create an instance
         if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS)
         {
             throw std::runtime_error("Failed to create instance!");
         }
     }
 
-    bool checkValidationLayerSupport()
+    bool checkInstanceValidationLayerSupport()
     {
         uint32_t layerCount;
         vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -222,22 +224,14 @@ private:
         return true;
     }
 
-    bool checkExtensionsSupport()
+    bool checkInstanceExtensionsSupport()
     {
-        // The first parameter allows us to filter extensions by a specific validation layer, which we'll ignore for now
         uint32_t extensionCount = 0;
         vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
 
         std::vector<VkExtensionProperties> extensions(extensionCount);
 
         vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
-
-        std::cout << "Available extensions:\n";
-
-        for (const auto &extension : extensions)
-        {
-            std::cout << '\t' << extension.extensionName << '\n';
-        }
 
         uint32_t glfwExtensionCount = 0;
         const char **glfwExtensions;
@@ -272,7 +266,7 @@ private:
         // The GLFW function glfwCreateWindowSurface takes care of this for us
         if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS)
         {
-            throw std::runtime_error("Failed to create window surface!");
+            throw std::runtime_error("Failed to create window surface");
         }
     }
 
@@ -283,7 +277,7 @@ private:
 
         if (deviceCount == 0)
         {
-            throw std::runtime_error("Failed to find GPUs with Vulkan support!");
+            throw std::runtime_error("Failed to find GPUs with Vulkan support");
         }
 
         std::vector<VkPhysicalDevice> devices(deviceCount);
@@ -291,39 +285,29 @@ private:
 
         for (const auto &device : devices)
         {
-            if (isDeviceSuitable(device))
+            if (isPhysicalDeviceSuitable(device))
             {
                 physicalDevice = device;
+                physicalDeviceQueueFamilyIndices = queryQueueFamiliesIndices(physicalDevice);
                 break;
             }
         }
 
         if (physicalDevice == VK_NULL_HANDLE)
         {
-            throw std::runtime_error("Failed to find a suitable GPU!");
+            throw std::runtime_error("Failed to find a suitable GPU");
         }
     }
 
-    bool isDeviceSuitable(VkPhysicalDevice device)
+    bool isPhysicalDeviceSuitable(VkPhysicalDevice device)
     {
-        // Basic device properties like the name, type and supported Vulkan version
-        VkPhysicalDeviceProperties deviceProperties;
-        vkGetPhysicalDeviceProperties(device, &deviceProperties);
+        QueueFamilyIndices indices = queryQueueFamiliesIndices(device);
 
-        // Optional features like texture compression, 64 bit floats and multi viewport rendering
-        VkPhysicalDeviceFeatures deviceFeatures;
-        vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+        bool queueFamiliesSupported = indices.supportsRequiredFamilies();
 
-        // Let's say we consider our application only usable for dedicated graphics cards that support geometry shaders
-        bool supportsGeometryShaders = deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
-                                       deviceFeatures.geometryShader;
+        bool propertiesAndFeaturesSupported = checkPhysicalDevicePropertiesAndFeaturesSupport(device);
 
-        // Almost every operation in Vulkan, anything from drawing to uploading textures, requires commands to be submitted to a queue
-        // There are different types of queues that originate from different queue families and each family of queues allows only a subset of commands
-        // We need to check which queue families are supported by the device and which one of these supports the commands that we want to use
-        bool hasRequiredQueueFamilies = findQueueFamilies(device).areRequiredFamiliesFound();
-
-        bool extensionsSupported = checkDeviceExtensionSupport(device);
+        bool extensionsSupported = checkPhysicalDeviceExtensionSupport(device);
 
         bool swapChainAdequate = false;
 
@@ -334,10 +318,14 @@ private:
             swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
         }
 
-        return supportsGeometryShaders && hasRequiredQueueFamilies && extensionsSupported && swapChainAdequate;
+        return propertiesAndFeaturesSupported && queueFamiliesSupported && extensionsSupported && swapChainAdequate;
     }
 
-    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
+    /*
+    Queues define the commands that a device can execute, these queues are partitioned into families depending on the types of operations they support
+    We need to check which queue families are supported by the device and which one of these supports the commands that we want to use
+    */
+    QueueFamilyIndices queryQueueFamiliesIndices(VkPhysicalDevice device)
     {
         QueueFamilyIndices indices;
 
@@ -355,6 +343,11 @@ private:
                 indices.graphicsFamily = i;
             }
 
+            if (queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT)
+            {
+                indices.computeFamily = i;
+            }
+
             VkBool32 presentSupport = false;
             vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
 
@@ -363,18 +356,25 @@ private:
                 indices.presentFamily = i;
             }
 
-            if (indices.areRequiredFamiliesFound())
-            {
-                break;
-            }
-
             i++;
         }
 
         return indices;
     }
 
-    bool checkDeviceExtensionSupport(VkPhysicalDevice device)
+    bool checkPhysicalDevicePropertiesAndFeaturesSupport(VkPhysicalDevice device)
+    {
+        VkPhysicalDeviceProperties deviceProperties;
+        vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+        VkPhysicalDeviceFeatures deviceFeatures;
+        vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+        return deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
+               deviceFeatures.geometryShader;
+    }
+
+    bool checkPhysicalDeviceExtensionSupport(VkPhysicalDevice device)
     {
         uint32_t extensionCount;
         vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
@@ -471,10 +471,8 @@ private:
 
     void createLogicalDevice()
     {
-        QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
-
         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-        std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+        std::set<uint32_t> uniqueQueueFamilies = {physicalDeviceQueueFamilyIndices.graphicsFamily.value(), physicalDeviceQueueFamilyIndices.presentFamily.value()};
 
         float queuePriority = 1.0f;
         for (uint32_t queueFamily : uniqueQueueFamilies)
@@ -523,8 +521,8 @@ private:
         }
 
         // The queues are automatically created along with the logical device, so we get a handle to the graphics and present queues we requested
-        vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
-        vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
+        vkGetDeviceQueue(device, physicalDeviceQueueFamilyIndices.graphicsFamily.value(), 0, &graphicsQueue);
+        vkGetDeviceQueue(device, physicalDeviceQueueFamilyIndices.presentFamily.value(), 0, &presentQueue);
     }
 
     void createSwapChain()
@@ -558,10 +556,9 @@ private:
         createInfo.imageArrayLayers = 1;
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-        QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
-        uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+        uint32_t queueFamilyIndices[] = {physicalDeviceQueueFamilyIndices.graphicsFamily.value(), physicalDeviceQueueFamilyIndices.presentFamily.value()};
 
-        if (indices.graphicsFamily != indices.presentFamily)
+        if (physicalDeviceQueueFamilyIndices.graphicsFamily != physicalDeviceQueueFamilyIndices.presentFamily)
         {
             createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
             createInfo.queueFamilyIndexCount = 2;
@@ -587,7 +584,7 @@ private:
 
         if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) != VK_SUCCESS)
         {
-            throw std::runtime_error("Failed to create swap chain!");
+            throw std::runtime_error("Failed to create swap chain");
         }
 
         // Remember that we only specified a minimum number of images in the swap chain, so the implementation is allowed to create a swap chain with more
@@ -661,18 +658,11 @@ private:
         colorAttachmentRef.attachment = 0;
         colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        // The index of the attachment in this array is directly referenced from the fragment shader with the layout(location = 0) out vec4 outColor directive!
+        // The index of the attachment in this array is directly referenced from the fragment shader with the layout(location = 0) out vec4 outColor directive
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colorAttachmentRef;
-
-        VkRenderPassCreateInfo renderPassInfo{};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &colorAttachment;
-        renderPassInfo.subpassCount = 1;
-        renderPassInfo.pSubpasses = &subpass;
 
         VkSubpassDependency dependency{};
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -682,6 +672,12 @@ private:
         dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
         renderPassInfo.dependencyCount = 1;
         renderPassInfo.pDependencies = &dependency;
 
@@ -860,23 +856,21 @@ private:
 
             if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &swapChainFramebuffers[i]) != VK_SUCCESS)
             {
-                throw std::runtime_error("Failed to create framebuffer!");
+                throw std::runtime_error("Failed to create framebuffer");
             }
         }
     }
 
     void createCommandPool()
     {
-        QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
-
         VkCommandPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+        poolInfo.queueFamilyIndex = physicalDeviceQueueFamilyIndices.graphicsFamily.value();
 
         if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS)
         {
-            throw std::runtime_error("Failed to create command pool!");
+            throw std::runtime_error("Failed to create command pool");
         }
     }
 
@@ -890,7 +884,7 @@ private:
 
         if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS)
         {
-            throw std::runtime_error("Failed to allocate command buffers!");
+            throw std::runtime_error("Failed to allocate command buffers");
         }
     }
 
@@ -898,12 +892,12 @@ private:
     {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = 0;                  // Optional
-        beginInfo.pInheritanceInfo = nullptr; // Optional
+        beginInfo.flags = 0;
+        beginInfo.pInheritanceInfo = nullptr;
 
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
         {
-            throw std::runtime_error("Failed to begin recording command buffer!");
+            throw std::runtime_error("Failed to begin recording command buffer");
         }
 
         VkRenderPassBeginInfo renderPassInfo{};
@@ -942,7 +936,7 @@ private:
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
         {
-            throw std::runtime_error("Failed to record command buffer!");
+            throw std::runtime_error("Failed to record command buffer");
         }
     }
 
@@ -960,28 +954,8 @@ private:
             vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
             vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS)
         {
-            throw std::runtime_error("Failed to create semaphores!");
+            throw std::runtime_error("Failed to create semaphores");
         }
-    }
-
-    static std::vector<char> readFile(const std::string &filename)
-    {
-        std::ifstream file(filename, std::ios::ate | std::ios::binary);
-
-        if (!file.is_open())
-        {
-            throw std::runtime_error("Failed to open file!");
-        }
-
-        size_t fileSize = (size_t)file.tellg();
-        std::vector<char> buffer(fileSize);
-
-        file.seekg(0);
-        file.read(buffer.data(), fileSize);
-
-        file.close();
-
-        return buffer;
     }
 
     void mainLoop()
@@ -1025,7 +999,7 @@ private:
 
         if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS)
         {
-            throw std::runtime_error("Failed to submit draw command buffer!");
+            throw std::runtime_error("Failed to submit draw command buffer");
         }
 
         VkPresentInfoKHR presentInfo{};
